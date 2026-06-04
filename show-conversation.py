@@ -364,8 +364,15 @@ Examples:
             sys.exit(1)
 
         search_dirs = [target_dir] if target_dir else [d for d in default_dirs if os.path.isdir(d)]
+        # Fall back to current directory if default dirs don't exist
+        if not search_dirs and not target_dir:
+            cwd = os.getcwd()
+            if any(f.endswith('.json') for f in os.listdir(cwd) if not os.path.basename(f).startswith(('index', 'listing'))):
+                search_dirs = [cwd]
         if not search_dirs:
             print("No conversation directory found.")
+            print(f"Searched default: {', '.join(default_dirs)}")
+            print(f"Run '{os.path.basename(__file__)} -l <dir>' to specify a directory.")
             sys.exit(1)
 
         total = 0
