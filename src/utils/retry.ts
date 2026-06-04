@@ -7,7 +7,7 @@ export interface RetryOptions {
 
 const defaultOptions: RetryOptions = {
   maxRetries: 10,
-  baseDelay: 1000,
+  baseDelay: 8000,
   maxDelay: 60000,
 };
 
