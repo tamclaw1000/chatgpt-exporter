@@ -397,7 +397,12 @@ Examples:
                     title = conv.get("title", "(untitled)")
                     ts = conv.get("create_time")
                     date_str = format_time(ts) if ts else ""
-                    print(f"  {conv_id}  {date_str:20s}  {title}")
+                    # Count visible messages
+                    mapping = conv.get("mapping", {})
+                    total_msgs = sum(1 for n in mapping.values() if n.get("message"))
+                    visible_msgs = sum(1 for n in mapping.values() if not is_hidden(n.get("message")))
+                    count_str = f"[{visible_msgs}/{total_msgs} msgs]"
+                    print(f"  {conv_id}  {date_str:20s}  {count_str:>14s}  {title}")
                 except Exception:
                     print(f"  {os.path.basename(f):40s}  [error reading]")
             if not target_dir and d != search_dirs[-1]:
