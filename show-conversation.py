@@ -376,14 +376,20 @@ Examples:
             sys.exit(1)
 
         total = 0
+        all_json_files: list[tuple[str, list[str]]] = []  # (dir, [files])
         for d in search_dirs:
             json_files = sorted(
                 f for f in glob.glob(os.path.join(d, "*.json"))
                 if not os.path.basename(f).startswith(("index", "listing"))
             )
+            all_json_files.append((d, json_files))
             total += len(json_files)
-            if target_dir:
-                print(f"\n📁  {d}\n")
+
+        print(f"\n📁  {len(all_json_files)} director{'y' if len(all_json_files) == 1 else 'ies'}, {total} conversation{'s' if total != 1 else ''}\n")
+
+        for d, json_files in all_json_files:
+            if target_dir or len(all_json_files) > 1:
+                print(f"  ── {os.path.basename(d)} ──")
             for f in json_files:
                 try:
                     conv = load_conversation(f)
@@ -396,7 +402,6 @@ Examples:
                     print(f"  {os.path.basename(f):40s}  [error reading]")
             if not target_dir and d != search_dirs[-1]:
                 print()
-        print(f"\n— {total} conversations —")
         sys.exit(0)
 
     if len(sys.argv) < 2:
