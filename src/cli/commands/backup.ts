@@ -24,6 +24,7 @@ export interface BackupCommandOptions {
   downloadFiles: boolean;
   verbose: boolean;
   project?: string;
+  maxRetries: number;
 }
 
 function runBackupWithProgress(

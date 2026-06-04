@@ -2,6 +2,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { ConversationItem, ConversationDetail } from '../api/types.js';
 
+export interface ListingCache {
+  timestamp: string;
+  total: number;
+  conversations: ConversationItem[];
+}
+
 export interface BackupMetadata {
   timestamp: string;
   totalConversations: number;
@@ -73,5 +79,27 @@ export class StorageService {
 
   getConversationPath(id: string): string {
     return path.join(this.conversationsDir, `${id}.json`);
+  }
+
+  private get listingCachePath(): string {
+    return path.join(this.conversationsDir, 'listing-cache.json');
+  }
+
+  async loadListingCache(): Promise<ListingCache | null> {
+    try {
+      const raw = await fs.readFile(this.listingCachePath, 'utf-8');
+      return JSON.parse(raw) as ListingCache;
+    } catch {
+      return null;
+    }
+  }
+
+  async saveListingCache(conversations: ConversationItem[]): Promise<void> {
+    const cache: ListingCache = {
+      timestamp: new Date().toISOString(),
+      total: conversations.length,
+      conversations,
+    };
+    await fs.writeFile(this.listingCachePath, JSON.stringify(cache, null, 2), 'utf-8');
   }
 }

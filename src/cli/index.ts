@@ -40,6 +40,7 @@ export function createCli(): Command {
     .option('--incremental', 'Only download new/updated conversations', false)
     .option('--download-files', 'Download file attachments and images', false)
     .option('--project <name-or-id>', 'Only backup conversations from a specific project')
+    .option('--max-retries <n>', 'Max retries per API call', (v) => parseInt(v, 10), 10)
     .option('-v, --verbose', 'Verbose logging', false)
     .action(async (options) => {
       const token = getToken(options);
@@ -52,6 +53,7 @@ export function createCli(): Command {
         downloadFiles: options.downloadFiles,
         verbose: options.verbose,
         project: options.project,
+        maxRetries: options.maxRetries,
       });
     });
 

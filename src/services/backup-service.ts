@@ -112,9 +112,75 @@ export class BackupService {
     await this.storage.initialize();
     await this.storage.appendLog('Starting backup...');
 
-    const conversations = projectGizmoId
-      ? await this.listProjectConversations(projectGizmoId, { delay, onListProgress })
-      : await this.listConversations({ delay, onListProgress });
+    let conversations: ConversationItem[];
+
+    // Try listing cache for incremental runs
+    if (incremental && !projectGizmoId) {
+      const cached = await this.storage.loadListingCache();
+      if (cached) {
+        await this.storage.appendLog(
+          `Listing cache found: ${cached.total} conversations from ${cached.timestamp}`
+        );
+        let useCache = false;
+        try {
+          const currentTotal = await countConversations(this.client);
+          await this.storage.appendLog(
+            `Server reports ${currentTotal} total conversations (cached: ${cached.total})`
+          );
+          // Server total should never be less than cache (conversations don't vanish).
+          // A lower count means the API returned a bogus/truncated response — trust the cache.
+          if (currentTotal < cached.total) {
+            const msg = `Server reported ${currentTotal} (less than cached ${cached.total}) — ignoring suspicious count, using cache`;
+            console.log(msg);
+            await this.storage.appendLog(msg);
+            useCache = true;
+          } else if (currentTotal === cached.total) {
+            useCache = true;
+            await this.storage.appendLog('Cache match — using cached listing, skipping API listing');
+          } else {
+            const msg = `Listing cache stale: cached ${cached.total}, server has ${currentTotal}. Refreshing...`;
+            console.log(msg);
+            await this.storage.appendLog(msg);
+          }
+        } catch (err) {
+          // Rate-limited or network error — fall back to cache
+          const msg = `Could not check listing count (${err instanceof Error ? err.message : err}). Falling back to cached listing`;
+          console.log(msg);
+          await this.storage.appendLog(msg);
+          useCache = true;
+        }
+        if (useCache) {
+          const msg = `Using cached listing (${cached.total} conversations from ${new Date(cached.timestamp).toLocaleString()})`;
+          console.log(msg);
+          conversations = cached.conversations;
+          onListProgress?.(cached.total, cached.total);
+        } else {
+          const msg = `Fetching fresh listing from API...`;
+          await this.storage.appendLog(msg);
+          conversations = await this.listConversations({ delay, onListProgress });
+          await this.storage.appendLog(`Fetched ${conversations.length} conversations`);
+          await this.storage.saveListingCache(conversations);
+          await this.storage.appendLog('Listing cache updated');
+        }
+      } else {
+        await this.storage.appendLog('No listing cache found — fetching from API');
+        conversations = await this.listConversations({ delay, onListProgress });
+        await this.storage.appendLog(`Fetched ${conversations.length} conversations`);
+        await this.storage.saveListingCache(conversations);
+        await this.storage.appendLog('Listing cache saved');
+      }
+    } else if (projectGizmoId) {
+      await this.storage.appendLog(`Fetching project conversations for gizmo ${projectGizmoId}`);
+      conversations = await this.listProjectConversations(projectGizmoId, { delay, onListProgress });
+      await this.storage.appendLog(`Fetched ${conversations.length} project conversations`);
+    } else {
+      await this.storage.appendLog('Non-incremental run — fetching full listing from API');
+      conversations = await this.listConversations({ delay, onListProgress });
+      await this.storage.appendLog(`Fetched ${conversations.length} conversations`);
+      await this.storage.saveListingCache(conversations);
+      await this.storage.appendLog('Listing cache saved');
+    }
+
     await this.storage.saveIndex(conversations);
 
     const errors: Array<{ conversationId: string; error: string }> = [];

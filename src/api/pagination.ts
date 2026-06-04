@@ -54,7 +54,7 @@ export async function* fetchAllConversations(
 
 export async function countConversations(client: ChatGPTClient): Promise<number> {
   const response = await client.fetch<ConversationsResponse>(
-    `${ENDPOINTS.CONVERSATIONS}?offset=0&limit=1`,
+    `${ENDPOINTS.CONVERSATIONS}?offset=0&limit=1&order=updated`,
     {
       parseResponse: (data) => ConversationsResponseSchema.parse(data),
     }
