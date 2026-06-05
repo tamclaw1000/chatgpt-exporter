@@ -214,6 +214,8 @@ export class BackupService {
     const inProgress = new Set<Promise<void>>();
 
     const processOne = async (conv: ConversationItem): Promise<void> => {
+      // Show the conversation title *while* it's being downloaded (before the fetch starts)
+      onDownloadProgress?.(completed, conversations.length, conv.title ?? conv.id);
       try {
         const detail = await this.downloadConversation(conv.id);
         await this.storage.saveConversation(conv.id, detail);
