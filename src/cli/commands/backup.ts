@@ -61,7 +61,7 @@ function runBackupWithProgress(
           }
         }
       },
-      onDownloadProgress: (completed, totalDownload) => {
+      onDownloadProgress: (completed, totalDownload, current) => {
         if (listingDone) {
           if (!downloadProgressBar) {
             downloadProgressBar = createProgressBar(
@@ -69,7 +69,9 @@ function runBackupWithProgress(
               'Downloading'
             );
           }
-          downloadProgressBar.update(completed);
+          downloadProgressBar.update(completed, {
+            topic: current ? current.slice(0, 60) : ''
+          });
         }
       },
       onError: (id, error) => {
