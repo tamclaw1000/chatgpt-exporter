@@ -342,7 +342,7 @@ Display ChatGPT conversation exports with clean formatting.
 
 Options:
   -l, --list-subjects [DIR]   List all conversation titles in DIR
-                               (defaults to export/mwt/conversations)
+                               (defaults to current directory)
   -h, --help                  Show this help message
 
 Examples:
@@ -358,22 +358,12 @@ Examples:
 
     if len(sys.argv) >= 2 and sys.argv[1] in ("--list-subjects", "-l"):
         # --- list mode ---
-        target_dir = sys.argv[2] if len(sys.argv) > 2 else None
-        if target_dir and not os.path.isdir(target_dir):
+        target_dir = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
+        if not os.path.isdir(target_dir):
             print(f"Not a directory: {target_dir}")
             sys.exit(1)
 
-        search_dirs = [target_dir] if target_dir else [d for d in default_dirs if os.path.isdir(d)]
-        # Fall back to current directory if default dirs don't exist
-        if not search_dirs and not target_dir:
-            cwd = os.getcwd()
-            if any(f.endswith('.json') for f in os.listdir(cwd) if not os.path.basename(f).startswith(('index', 'listing'))):
-                search_dirs = [cwd]
-        if not search_dirs:
-            print("No conversation directory found.")
-            print(f"Searched default: {', '.join(default_dirs)}")
-            print(f"Run '{os.path.basename(__file__)} -l <dir>' to specify a directory.")
-            sys.exit(1)
+        search_dirs = [target_dir]
 
         total = 0
         all_json_files: list[tuple[str, list[str]]] = []  # (dir, [files])
