@@ -23,11 +23,8 @@ def display_width(text: str) -> int:
             w += 2
         else:
             w += 1
-    # Also handle emoji sequences (ZWJ, variation selectors, skin tones, flags)
-    # These are already counted above; subtract overcount for zero-width joiners
     for ch in text:
         if unicodedata.category(ch) in ('Mn', 'Cf') and ord(ch) not in (0x200D,):
-            # Combining marks and format chars (except ZWJ) add nothing to width
             w -= 1
     return max(w, 0)
 
@@ -76,9 +73,6 @@ def is_hidden(msg: dict | None) -> bool:
     return False
 
 
-import re
-import json as _json
-
 # genui widgets: \ue200 genui \ue202 {JSON} \ue201
 _GENUI_OPEN  = '\ue200'
 _GENUI_MID   = '\ue202'
@@ -118,12 +112,11 @@ def _parse_genui_jobs(text: str) -> list[str]:
             pos = json_start
             continue
         json_str, end = result
-        # skip closing U+E201 if present
         if end < len(text) and text[end] == _GENUI_CLOSE:
             end += 1
         pos = end
         try:
-            blob = _json.loads(json_str)
+            blob = json.loads(json_str)
             widget = blob.get("jobs_widget")
             if widget:
                 title = widget.get("title", "???")
@@ -142,7 +135,7 @@ def _parse_genui_jobs(text: str) -> list[str]:
                 if apply_url:
                     lines.append(f"    🔗 {apply_url}")
                 cards.append("\n".join(lines))
-        except (_json.JSONDecodeError, KeyError):
+        except (json.JSONDecodeError, KeyError):
             pass
     return cards
 
@@ -153,11 +146,8 @@ def extract_text(parts: list) -> str:
     for p in parts:
         if not isinstance(p, str):
             continue
-        # Parse job cards first (before we strip markers)
         cards = _parse_genui_jobs(p)
-        # Strip all genui markup using balanced-brace extraction
         cleaned = p
-        # Remove \ue200 genui \ue202 {balanced_json} \ue201 blocks
         pos = 0
         result_parts = []
         while True:
@@ -174,16 +164,11 @@ def extract_text(parts: list) -> str:
                     end += 1
                 pos = end
             else:
-                # Couldn't parse — skip past this marker
                 pos = json_start
         cleaned = ''.join(result_parts)
-        # Strip genui_run lines
         cleaned = re.sub(r'genui_run result of .*?\n\n?', '', cleaned)
-        # Strip any leftover private-use chars
         cleaned = cleaned.replace(_GENUI_OPEN, '').replace(_GENUI_MID, '').replace(_GENUI_CLOSE, '')
-        # Remove leftover "genui" word
         cleaned = re.sub(r'\bgenui\b', '', cleaned)
-        # Collapse multiple blank lines
         cleaned = re.sub(r'\n{3,}', '\n\n', cleaned)
         cleaned = cleaned.strip()
         if cleaned:
@@ -191,6 +176,150 @@ def extract_text(parts: list) -> str:
         for card in cards:
             pieces.append(card)
     return "\n\n".join(pieces).strip()
+
+
+# ── downloaded file helpers ──────────────────────────────────────
+
+FILE_SERVICE_PREFIX = "file-service://"
+
+
+def find_export_root(conversation_path: str | None) -> str:
+    """Find export root containing files/, conversations/, or projects/."""
+    if not conversation_path:
+        return os.getcwd()
+
+    d = os.path.dirname(os.path.abspath(conversation_path))
+    while True:
+        if (
+            os.path.isdir(os.path.join(d, "files"))
+            or os.path.isdir(os.path.join(d, "conversations"))
+            or os.path.isdir(os.path.join(d, "projects"))
+        ):
+            return d
+
+        parent = os.path.dirname(d)
+        if parent == d:
+            return os.path.dirname(os.path.abspath(conversation_path))
+        d = parent
+
+
+def extract_file_id_from_pointer(pointer: str | None) -> str | None:
+    if not pointer:
+        return None
+    if pointer.startswith(FILE_SERVICE_PREFIX):
+        return pointer[len(FILE_SERVICE_PREFIX):]
+    return None
+
+
+def first_file_under(directory: str) -> str | None:
+    """Return the first real file under a downloaded file-id directory."""
+    if not os.path.isdir(directory):
+        return None
+
+    for root, _, files in os.walk(directory):
+        for name in sorted(files):
+            return os.path.join(root, name)
+
+    return None
+
+
+def resolve_downloaded_file(export_root: str, file_id: str) -> str | None:
+    """Resolve output/files/<file_id>/<actual filename>."""
+    return first_file_under(os.path.join(export_root, "files", file_id))
+
+
+def extract_message_file_refs(msg: dict, export_root: str) -> list[dict]:
+    """Extract file references linked to a single message."""
+    refs_by_id: dict[str, dict] = {}
+
+    def add_ref(file_id: str | None, source: str, name: str | None = None) -> None:
+        if not file_id:
+            return
+        local_path = resolve_downloaded_file(export_root, file_id)
+        refs_by_id.setdefault(file_id, {
+            "file_id": file_id,
+            "source": source,
+            "name": name,
+            "path": local_path,
+        })
+        if name and not refs_by_id[file_id].get("name"):
+            refs_by_id[file_id]["name"] = name
+        if local_path and not refs_by_id[file_id].get("path"):
+            refs_by_id[file_id]["path"] = local_path
+
+    content = msg.get("content", {})
+    for part in content.get("parts", []):
+        if isinstance(part, dict) and part.get("content_type") == "image_asset_pointer":
+            add_ref(
+                extract_file_id_from_pointer(part.get("asset_pointer")),
+                "image",
+                part.get("metadata", {}).get("name") if isinstance(part.get("metadata"), dict) else None,
+            )
+
+    meta = msg.get("metadata", {})
+
+    for att in meta.get("attachments", []) if isinstance(meta.get("attachments"), list) else []:
+        if isinstance(att, dict):
+            add_ref(att.get("id"), "attachment", att.get("name") or att.get("file_name"))
+
+    for cit in meta.get("citations", []) if isinstance(meta.get("citations"), list) else []:
+        if not isinstance(cit, dict):
+            continue
+        cit_meta = cit.get("metadata", {})
+        if not isinstance(cit_meta, dict):
+            cit_meta = {}
+        add_ref(
+            cit_meta.get("file_id") or cit.get("file_id"),
+            "citation",
+            cit_meta.get("title") or cit.get("title") or cit.get("name"),
+        )
+
+    return list(refs_by_id.values())
+
+
+def count_conversation_file_refs(conv: dict) -> int:
+    ids: set[str] = set()
+    for node in conv.get("mapping", {}).values():
+        msg = node.get("message")
+        if not msg:
+            continue
+
+        content = msg.get("content", {})
+        for part in content.get("parts", []):
+            if isinstance(part, dict) and part.get("content_type") == "image_asset_pointer":
+                fid = extract_file_id_from_pointer(part.get("asset_pointer"))
+                if fid:
+                    ids.add(fid)
+
+        meta = msg.get("metadata", {})
+        for att in meta.get("attachments", []) if isinstance(meta.get("attachments"), list) else []:
+            if isinstance(att, dict) and att.get("id"):
+                ids.add(att["id"])
+
+        for cit in meta.get("citations", []) if isinstance(meta.get("citations"), list) else []:
+            if isinstance(cit, dict):
+                cit_meta = cit.get("metadata", {})
+                if not isinstance(cit_meta, dict):
+                    cit_meta = {}
+                fid = cit_meta.get("file_id") or cit.get("file_id")
+                if fid:
+                    ids.add(fid)
+
+    return len(ids)
+
+
+def format_file_ref(ref: dict, base_dir: str) -> str:
+    file_id = ref["file_id"]
+    source = ref.get("source", "file")
+    name = ref.get("name") or file_id
+    path = ref.get("path")
+
+    if path:
+        rel = os.path.relpath(path, base_dir)
+        uri = "file://" + os.path.abspath(path)
+        return f"📎 {source}: {name}  [{file_id}]\n   ↳ {rel}\n   ↳ {uri}"
+
+    return f"📎 {source}: {name}  [{file_id}]\n   ↳ not downloaded under files/{file_id}/"
 
 
 # ── display helpers ──────────────────────────────────────────────
@@ -212,7 +341,7 @@ BOX_BOT    = "╰" + "─" * (WIDTH - 2) + "╯"
 
 def box_line(text: str = "", align: str = "left") -> str:
     """Return text padded inside box borders."""
-    inner_width = WIDTH - 4  # one space + border on each side
+    inner_width = WIDTH - 4
     visible = display_width(text)
     if align == "right":
         pad = inner_width - visible
@@ -222,7 +351,6 @@ def box_line(text: str = "", align: str = "left") -> str:
         pad_right = inner_width - visible - pad_left
         return "│ " + (" " * max(pad_left, 0)) + text + (" " * max(pad_right, 0)) + " │"
     else:
-        # left
         return "│ " + text + (" " * max(inner_width - visible, 0)) + " │"
 
 
@@ -256,13 +384,16 @@ def format_time(ts: float | None) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def show_conversation(conv: dict) -> None:
+def show_conversation(conv: dict, conversation_path: str | None = None) -> None:
     title = conv.get("title", "Untitled")
     create_time = conv.get("create_time")
     mapping = conv.get("mapping", {})
     thread = walk_thread(mapping)
+    export_root = find_export_root(conversation_path)
+    base_dir = os.path.dirname(os.path.abspath(conversation_path)) if conversation_path else os.getcwd()
 
-    # ── header ──
+    file_ref_count = count_conversation_file_refs(conv)
+
     print()
     print(BOX_TOP)
     print(box_line(f"📁  {title}", align="center"))
@@ -270,10 +401,12 @@ def show_conversation(conv: dict) -> None:
         print(box_line(format_time(create_time), align="center"))
     print(box_line(align="center"))
     print(box_line(f"{len([n for n in thread if n.get('message')])} total messages", align="center"))
+    if file_ref_count:
+        print(box_line(f"{file_ref_count} linked file reference{'s' if file_ref_count != 1 else ''}", align="center"))
     print(BOX_BOT)
 
     msg_count = 0
-    inner_width = WIDTH - 4  # usable text width inside box
+    inner_width = WIDTH - 4
 
     for node in thread:
         msg = node.get("message")
@@ -286,12 +419,11 @@ def show_conversation(conv: dict) -> None:
         ts = msg.get("create_time")
         parts = msg.get("content", {}).get("parts", [])
         text = extract_text(parts)
+        file_refs = extract_message_file_refs(msg, export_root)
 
-        if not text:
+        if not text and not file_refs:
             continue
 
-        # Build header with speaker + timestamp
-        # Format: "│  [timestamp]                    Speaker │"
         ts_str = format_time(ts) if ts else ""
         header = f"{ts_str}    {label}"
 
@@ -300,14 +432,22 @@ def show_conversation(conv: dict) -> None:
         print(box_line(header, align="right"))
         print(BOX_MID)
 
-        # Word-wrap the body
-        body_lines = wrap_text(text, inner_width)
-        for line in body_lines:
-            print(box_line(line))
+        if text:
+            body_lines = wrap_text(text, inner_width)
+            for line in body_lines:
+                print(box_line(line))
+
+        if file_refs:
+            if text:
+                print(box_line(""))
+                print(box_line("Files:"))
+            for ref in file_refs:
+                for line in format_file_ref(ref, base_dir).splitlines():
+                    for wrapped in wrap_text(line, inner_width):
+                        print(box_line(wrapped))
 
         print(BOX_BOT)
 
-    # ── footer ──
     print()
     print(BOX_TOP)
     print(box_line(f"✨ {msg_count} visible messages", align="center"))
@@ -357,7 +497,6 @@ Examples:
         sys.exit(0)
 
     if len(sys.argv) >= 2 and sys.argv[1] in ("--list-subjects", "-l"):
-        # --- list mode ---
         target_dir = sys.argv[2] if len(sys.argv) > 2 else os.getcwd()
         if not os.path.isdir(target_dir):
             print(f"Not a directory: {target_dir}")
@@ -366,7 +505,7 @@ Examples:
         search_dirs = [target_dir]
 
         total = 0
-        all_json_files: list[tuple[str, list[str]]] = []  # (dir, [files])
+        all_json_files: list[tuple[str, list[str]]] = []
         for d in search_dirs:
             json_files = sorted(
                 f for f in glob.glob(os.path.join(d, "*.json"))
@@ -387,20 +526,20 @@ Examples:
                     title = conv.get("title", "(untitled)")
                     ts = conv.get("create_time")
                     date_str = format_time(ts) if ts else ""
-                    # Count visible messages
                     mapping = conv.get("mapping", {})
                     total_msgs = sum(1 for n in mapping.values() if n.get("message"))
                     visible_msgs = sum(1 for n in mapping.values() if not is_hidden(n.get("message")))
-                    count_str = f"[{visible_msgs}/{total_msgs} msgs]"
-                    print(f"  {conv_id}  {date_str:20s}  {count_str:>14s}  {title}")
+                    file_count = count_conversation_file_refs(conv)
+                    count_str = f"[{visible_msgs}/{total_msgs} msgs"
+                    if file_count:
+                        count_str += f", {file_count} files"
+                    count_str += "]"
+                    print(f"  {conv_id}  {date_str:20s}  {count_str:>24s}  {title}")
                 except Exception:
                     print(f"  {os.path.basename(f):40s}  [error reading]")
-            if not target_dir and d != search_dirs[-1]:
-                print()
         sys.exit(0)
 
     if len(sys.argv) < 2:
-        # Search common export locations for the most recent conversation
         all_files = []
         for d in default_dirs:
             if os.path.isdir(d):
@@ -415,10 +554,10 @@ Examples:
             sys.exit(1)
         target = max(all_files, key=os.path.getmtime)
         print(f"📂  {os.path.basename(target)}\n")
-        show_conversation(load_conversation(target))
+        show_conversation(load_conversation(target), target)
     else:
         if not os.path.isfile(sys.argv[1]):
             print(f"File not found: {sys.argv[1]}")
             print(f"Run '{os.path.basename(__file__)} -h' for help.")
             sys.exit(1)
-        show_conversation(load_conversation(sys.argv[1]))
+        show_conversation(load_conversation(sys.argv[1]), sys.argv[1])
