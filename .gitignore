@@ -6,4 +6,4 @@ export/
 .env
 .DS_Store
 .claude
-run.sh
+listing-cache.json
