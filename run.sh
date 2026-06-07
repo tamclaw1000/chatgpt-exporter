@@ -1,38 +1,74 @@
 #!/bin/bash
+set -e
+
+ACCOUNT="mwt"
+
+if [ $# -eq 0 ]; then
+    echo "Usage:"
+    echo "  $0 refresh"
+    echo "  $0 list-projects"
+    echo "  $0 update-projects <project_id>"
+    exit 1
+fi
+
+MODE="$1"
+PROJECT_ID="$2"
+
 export CHATGPT_TOKEN=$(pass show openai/manweitam/access_token)
-ACCOUNT=mwt
 
 npm run build
 
-### Refresh
-rm export/mwt/conversations/listing-cache.json
-npm start -- backup \
---output "export/${ACCOUNT}" \
---incremental \
---download-files \
---verbose \
---concurrency 3 \
---delay 1000
+case "$MODE" in
+  refresh)
+    rm -f "export/${ACCOUNT}/conversations/listing-cache.json"
 
-exit -1
- 
-## List Projects
-npm start -- projects | tee exports/${ACCOUNT}/projects/projects-list.txt
+    npm start -- backup \
+      --output "export/${ACCOUNT}" \
+      --incremental \
+      --download-files \
+      --verbose \
+      --concurrency 3 \
+      --delay 1000
+    ;;
 
-## Update Projects
-# --for i in $(cut -c1-36 export/mwt/projects/projects-list.txt|grep -v ^x); do
-# --  echo $i;
-# --  npm start -- backup \
-# --    --output "export/${ACCOUNT}" \
-# --    --project $i
-# --    --download-files \
-# --    --verbose \
-# --    --concurrency 1 \
-# --    --delay 500
-# --done
-# --
-# --exit -1
-# --
+  list-projects)
+    mkdir -p "export/${ACCOUNT}/projects"
+
+    npm start -- projects | tee "export/${ACCOUNT}/projects/projects-list.txt"
+    ;;
+
+  update-projects)
+    if [ -z "$PROJECT_ID" ]; then
+      echo "Usage: $0 update-projects <project_id>"
+      exit 1
+    fi
+
+    npm start -- backup \
+      --output "export/${ACCOUNT}" \
+      --project "$PROJECT_ID" \
+      --download-files \
+      --verbose \
+      --concurrency 1 \
+      --delay 500
+    ;;
+
+  *)
+    echo "Unknown mode: $MODE"
+    echo
+    echo "Usage:"
+    echo "  $0 refresh"
+    echo "  $0 list-projects"
+    echo "  $0 update-projects <project_id>"
+    exit 1
+    ;;
+esac
+
+echo Files Changed:
+find export/${ACCOUNT} -cmin -5
+
+cd exports
+git add .
+git commit -m "Backup $(date)"
+rsync -ruvh --progress . /mnt/nas5/systems/takeouts/OpenAI/export
+
 unset CHATGPT_TOKEN
-
-#npx chatgpt-exporter backup --token $CHATGPT_TOKEN --verbose --incremental --download-files --output "export/${ACCOUNT}"

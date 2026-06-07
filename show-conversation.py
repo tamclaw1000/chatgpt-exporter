@@ -308,18 +308,24 @@ def count_conversation_file_refs(conv: dict) -> int:
     return len(ids)
 
 
-def format_file_ref(ref: dict, base_dir: str) -> str:
+def format_file_ref(ref: dict) -> str:
     file_id = ref["file_id"]
     source = ref.get("source", "file")
     name = ref.get("name") or file_id
     path = ref.get("path")
 
     if path:
-        rel = os.path.relpath(path, base_dir)
-        uri = "file://" + os.path.abspath(path)
-        return f"📎 {source}: {name}  [{file_id}]\n   ↳ {rel}\n   ↳ {uri}"
+        return (
+            f"📎 {source}: {name}\n"
+            f"   File ID: {file_id}\n"
+            f"   Path: {os.path.abspath(path)}"
+        )
 
-    return f"📎 {source}: {name}  [{file_id}]\n   ↳ not downloaded under files/{file_id}/"
+    return (
+        f"📎 {source}: {name}\n"
+        f"   File ID: {file_id}\n"
+        f"   Path: NOT DOWNLOADED"
+    )
 
 
 # ── display helpers ──────────────────────────────────────────────
@@ -442,7 +448,7 @@ def show_conversation(conv: dict, conversation_path: str | None = None) -> None:
                 print(box_line(""))
                 print(box_line("Files:"))
             for ref in file_refs:
-                for line in format_file_ref(ref, base_dir).splitlines():
+                for line in format_file_ref(ref).splitlines():
                     for wrapped in wrap_text(line, inner_width):
                         print(box_line(wrapped))
 
