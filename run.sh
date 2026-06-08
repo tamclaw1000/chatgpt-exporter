@@ -66,9 +66,13 @@ esac
 echo Files Changed:
 find export/${ACCOUNT} -cmin -5
 
-cd exports
+rsync -ruvh --exclude .git --progress . /mnt/nas5/systems/takeouts/OpenAI/export
+
+cd export
 git add .
 git commit -m "Backup $(date)"
-rsync -ruvh --progress . /mnt/nas5/systems/takeouts/OpenAI/export
+git log -1 --name-status
+
+
 
 unset CHATGPT_TOKEN
