@@ -1,4 +1,9 @@
 #!/bin/bash
+## To refresh token:
+## 1. Navigate to https://chatgpt.com/api/auth/session
+## 2. Extract accessToken":"ey..."
+## 3. pass edit openai/manweitam/access_token
+
 set -e
 
 cd /home/mwt/projects/ai/chatgpt/export/chatgpt-exporter
