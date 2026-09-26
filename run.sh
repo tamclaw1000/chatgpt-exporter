@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+cd /home/mwt/projects/ai/chatgpt/export/chatgpt-exporter
+
 ACCOUNT="mwt"
 
 if [ $# -eq 0 ]; then
@@ -28,7 +30,7 @@ case "$MODE" in
       --download-files \
       --verbose \
       --concurrency 3 \
-      --delay 1000
+      --delay 3000
     ;;
 
   list-projects)
